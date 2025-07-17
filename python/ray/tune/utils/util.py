@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import time
+import traceback
 from collections import defaultdict
 from datetime import datetime
 from numbers import Number
@@ -408,12 +409,25 @@ def _atomic_save(state: Dict, checkpoint_dir: str, file_name: str, tmp_file_name
     """
     import ray.cloudpickle as cloudpickle
 
-    tmp_search_ckpt_path = os.path.join(checkpoint_dir, tmp_file_name)
-    with open(tmp_search_ckpt_path, "wb") as f:
-        cloudpickle.dump(state, f)
+    num_retries: int = 100
+    is_exception = True
+    while is_exception:
 
-    os.replace(tmp_search_ckpt_path, os.path.join(checkpoint_dir, file_name))
-
+        is_exception = False
+        try:
+            tmp_search_ckpt_path = os.path.join(checkpoint_dir, tmp_file_name)
+            with open(tmp_search_ckpt_path, "wb") as f:
+                cloudpickle.dump(state, f)
+        
+            os.replace(tmp_search_ckpt_path, os.path.join(checkpoint_dir, file_name))
+        except Exception as e:
+            print(f"Failed to save search state tmp_file_name={tmp_file_name}, checkpoint_dir={checkpoint_dir}, file_name={file_name}")
+            print(f"Exception: {traceback.format_exc()}")
+            num_retries -= 1
+            if num_retries < 0:
+                raise e
+            is_exception = True
+            time.sleep(1)
 
 def _load_newest_checkpoint(dirpath: str, ckpt_pattern: str) -> Optional[Dict]:
     """Returns the most recently modified checkpoint.
